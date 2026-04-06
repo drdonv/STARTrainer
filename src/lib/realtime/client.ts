@@ -3,6 +3,7 @@ import type { ClientEvent, ServerEvent } from "./events";
 export type RealtimeEventHandler = (event: ServerEvent) => void;
 
 const REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+const CONNECT_TIMEOUT_MS = 10000;
 
 export class RealtimeClient {
   private ws: WebSocket | null = null;
@@ -20,6 +21,24 @@ export class RealtimeClient {
 
   connect(ephemeralToken: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const settleResolve = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      const settleReject = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      };
+      const timeoutId = setTimeout(() => {
+        this.disconnect();
+        settleReject(new Error("Timed out waiting for realtime session"));
+      }, CONNECT_TIMEOUT_MS);
+
       try {
         this.ws = new WebSocket(REALTIME_URL, [
           "realtime",
@@ -37,17 +56,19 @@ export class RealtimeClient {
 
             if (serverEvent.type === "session.created") {
               this._isSessionReady = true;
-              resolve();
+              settleResolve();
             }
           } catch {
-            console.error("Failed to parse realtime event:", event.data);
+            const payloadSize =
+              typeof event.data === "string" ? event.data.length : 0;
+            console.error("Failed to parse realtime event", { payloadSize });
           }
         };
 
         this.ws.onerror = (err) => {
           console.error("WebSocket error:", err);
           if (!this._isSessionReady) {
-            reject(new Error(`WebSocket connection failed: ${err.type}`));
+            settleReject(new Error(`WebSocket connection failed: ${err.type}`));
           }
         };
 
@@ -57,7 +78,9 @@ export class RealtimeClient {
           console.log("WebSocket closed:", event.code, event.reason);
         };
       } catch (err) {
-        reject(err);
+        const message =
+          err instanceof Error ? err.message : "Unknown WebSocket setup error";
+        settleReject(new Error(message));
       }
     });
   }

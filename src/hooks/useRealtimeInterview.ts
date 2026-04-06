@@ -371,10 +371,33 @@ export function useRealtimeInterview() {
 
     try {
       // Get ephemeral token
-      const tokenRes = await fetch("/api/realtime-session", { method: "POST" });
+      const tokenRes = await fetch("/api/realtime-session", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
       if (!tokenRes.ok) {
-        const errData = await tokenRes.json();
-        throw new Error(errData.error || "Failed to get session token");
+        let errMessage = "Failed to get session token";
+        try {
+          const errData: unknown = await tokenRes.json();
+          if (
+            errData &&
+            typeof errData === "object" &&
+            typeof (errData as { error?: unknown }).error === "string"
+          ) {
+            errMessage = (errData as { error: string }).error;
+          }
+        } catch {
+          // Ignore parsing errors and fall back to status-based messages.
+        }
+        if (tokenRes.status === 401) {
+          errMessage = "Please sign in to start an interview session.";
+        } else if (tokenRes.status === 429) {
+          errMessage = "Too many attempts. Please wait a moment and try again.";
+        }
+        throw new Error(errMessage);
       }
       const tokenBody: unknown = await tokenRes.json();
       if (
@@ -439,13 +462,7 @@ export function useRealtimeInterview() {
 
       client.on("error", (e) => {
         const summary = formatRealtimeErrorEvent(e);
-        let raw: string;
-        try {
-          raw = JSON.stringify(e);
-        } catch {
-          raw = "[unserializable]";
-        }
-        console.error("Realtime API error:", summary, raw);
+        console.error("Realtime API error:", summary);
       });
 
       // Start audio capture
@@ -545,6 +562,10 @@ export function useRealtimeInterview() {
   );
 
   const endSession = useCallback(() => {
+    // Stop microphone capture immediately when the user ends the session.
+    stopCapture();
+    setIsSpeaking(false);
+
     if (evalTimerRef.current) {
       clearInterval(evalTimerRef.current);
       evalTimerRef.current = null;
@@ -591,7 +612,6 @@ export function useRealtimeInterview() {
       });
     }
 
-    stopCapture();
     setTimeout(() => {
       clientRef.current?.disconnect();
       clientRef.current = null;

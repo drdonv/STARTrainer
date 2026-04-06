@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { base64EncodeAudio, downsampleTo24kHz } from "@/lib/realtime/audio";
 
 const BUFFER_SIZE = 4096;
@@ -16,7 +16,10 @@ export function useAudioCapture({ onAudioChunk }: UseAudioCaptureOptions) {
   const contextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const onAudioChunkRef = useRef(onAudioChunk);
-  onAudioChunkRef.current = onAudioChunk;
+
+  useEffect(() => {
+    onAudioChunkRef.current = onAudioChunk;
+  }, [onAudioChunk]);
 
   const start = useCallback(async () => {
     try {
