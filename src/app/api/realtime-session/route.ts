@@ -1,12 +1,113 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { getCurrentUserId } from "@/lib/auth/getCurrentUserId";
+import {
+  clientIpFromHeaders,
+  enterRealtimeSessionMintGate,
+} from "@/lib/security/rateLimit";
+
+const RATE_LIMIT_MESSAGE = "Too many requests. Please try again later.";
+const SERVICE_UNAVAILABLE_MESSAGE =
+  "Service temporarily unavailable. Please try again later.";
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+};
+
+function jsonNoStore(
+  body: Record<string, unknown>,
+  status: number,
+  headersInit?: HeadersInit,
+) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      ...NO_STORE_HEADERS,
+      ...(headersInit ?? {}),
+    },
+  });
+}
+
+function isSameOriginRequest(headerList: Headers): boolean {
+  const fetchSite = headerList.get("sec-fetch-site");
+  if (
+    fetchSite &&
+    fetchSite !== "same-origin" &&
+    fetchSite !== "none"
+  ) {
+    return false;
+  }
+
+  const origin = headerList.get("origin");
+  if (!origin) {
+    return true;
+  }
+
+  const hostHeader = headerList.get("x-forwarded-host") ?? headerList.get("host");
+  if (!hostHeader) {
+    return false;
+  }
+  const host = hostHeader.split(",")[0]?.trim().toLowerCase();
+  if (!host) {
+    return false;
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.host.toLowerCase() !== host) {
+      return false;
+    }
+
+    const forwardedProto = headerList
+      .get("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+    if (forwardedProto && originUrl.protocol !== `${forwardedProto}:`) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasExpectedRequestHeader(headerList: Headers): boolean {
+  const requestedWith = headerList.get("x-requested-with");
+  return requestedWith === "XMLHttpRequest";
+}
 
 export async function POST() {
+  const headerList = await headers();
+  if (
+    !isSameOriginRequest(headerList) ||
+    !hasExpectedRequestHeader(headerList)
+  ) {
+    return jsonNoStore({ error: "Forbidden" }, 403);
+  }
+
+  const clientIp = clientIpFromHeaders(headerList);
+  const clerkUserId = await getCurrentUserId();
+  /** Rate-limit key: signed-in users get Clerk `userId`; anonymous visitors are scoped by IP. */
+  const mintUserKey = clerkUserId ?? `anon:${clientIp}`;
+
+  const gate = await enterRealtimeSessionMintGate(mintUserKey, clientIp);
+  if (!gate.ok) {
+    if (gate.misconfigured) {
+      return jsonNoStore({ error: SERVICE_UNAVAILABLE_MESSAGE }, 503);
+    }
+    const retryAfter = gate.retryAfterSeconds ?? 60;
+    return jsonNoStore(
+      { error: RATE_LIMIT_MESSAGE },
+      429,
+      { "Retry-After": String(retryAfter) },
+    );
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY not configured" },
-      { status: 500 },
-    );
+    console.error("Realtime session: upstream credentials not configured");
+    return jsonNoStore({ error: SERVICE_UNAVAILABLE_MESSAGE }, 503);
   }
 
   try {
@@ -49,19 +150,18 @@ export async function POST() {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error("OpenAI client_secrets creation failed:", errorData);
-      return NextResponse.json(
-        { error: "Failed to create realtime session" },
-        { status: response.status },
-      );
+      const redactedSnippet =
+        errorData.length > 180 ? `${errorData.slice(0, 180)}...` : errorData;
+      console.error("OpenAI client_secrets creation failed", {
+        status: response.status,
+        detail: redactedSnippet,
+      });
+      return jsonNoStore({ error: "Failed to create realtime session" }, 502);
     }
 
     const data: unknown = await response.json();
     if (!data || typeof data !== "object") {
-      return NextResponse.json(
-        { error: "Invalid session response" },
-        { status: 502 },
-      );
+      return jsonNoStore({ error: "Invalid session response" }, 502);
     }
     const o = data as Record<string, unknown>;
     // GA API returns the secret at data.value (e.g. "ek_...")
@@ -75,17 +175,14 @@ export async function POST() {
     const token = typeof raw === "string" ? raw.trim() : "";
     if (!token || token.length > 4096) {
       console.error("No or invalid client secret in response");
-      return NextResponse.json(
-        { error: "No client secret returned" },
-        { status: 500 },
-      );
+      return jsonNoStore({ error: "No client secret returned" }, 500);
     }
-    return NextResponse.json({ token });
-  } catch (err) {
-    console.error("Error creating realtime session:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    return jsonNoStore({ token }, 200);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Error creating realtime session", { message });
+    return jsonNoStore({ error: "Internal server error" }, 500);
+  } finally {
+    await gate.release();
   }
 }
