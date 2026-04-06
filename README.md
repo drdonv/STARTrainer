@@ -4,6 +4,8 @@ A real-time behavioral interview coach that listens while you speak and **interr
 
 > The defining feature is not post-hoc analysis — it is the live interruption. If you ramble, overuse filler words, or stall on STAR structure while speaking, the app hard-stops you immediately.
 
+**Contributors and AI agents:** For a concise map of `src/`, data flow, `SessionState` transitions, and a “how to add a feature” checklist, see **[ORCHESTRATOR.md](./ORCHESTRATOR.md)**.
+
 ---
 
 ## What It Does
@@ -25,6 +27,8 @@ A real-time behavioral interview coach that listens while you speak and **interr
 ### Security model
 
 The browser never holds the full OpenAI API key. A Next.js API route (`POST /api/realtime-session`) mints a short-lived **ephemeral token** server-side by calling `https://api.openai.com/v1/realtime/client_secrets`. The browser uses this token as a WebSocket subprotocol credential, giving it a scoped, time-limited connection with no permanent key exposure.
+
+That route applies per-caller rate limiting (Clerk `userId` when signed in, otherwise client IP) and rejects requests that fail same-origin and browser-style `fetch` checks (`Sec-Fetch-Site` / `Origin` vs host, `X-Requested-With`). These measures curb casual abuse but are not a substitute for strict authentication if you need to guarantee only trusted callers can mint tokens.
 
 ### Audio pipeline
 
@@ -166,8 +170,16 @@ src/
 # Install dependencies
 npm install
 
-# Add your API key
-echo "OPENAI_API_KEY=sk-..." > .env.local
+# Add required keys
+cat > .env.local <<'EOF'
+OPENAI_API_KEY=sk-...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+EOF
+
+# Optional distributed rate limiting (recommended for production)
+# UPSTASH_REDIS_REST_URL=...
+# UPSTASH_REDIS_REST_TOKEN=...
 
 # Start dev server
 npm run dev
@@ -188,7 +200,7 @@ npm run lint
 vercel deploy
 ```
 
-Set `OPENAI_API_KEY` as an environment variable in your Vercel project settings. The API key is used only in the server-side route; it is never bundled into client JavaScript.
+Set `OPENAI_API_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY` as environment variables in your Vercel project settings. `OPENAI_API_KEY` and `CLERK_SECRET_KEY` are server-only.
 
 ---
 
