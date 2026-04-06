@@ -1,5 +1,11 @@
 "use client";
 
+/* Re-enable sign-in UI: import SignInButton from @clerk/nextjs and uncomment the two SignInButton blocks below (header + idle). */
+import {
+  // SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/nextjs";
 import { useRealtimeInterview } from "@/hooks/useRealtimeInterview";
 import { StatusIndicator } from "./StatusIndicator";
 import { QuestionCard } from "./QuestionCard";
@@ -9,6 +15,7 @@ import { CoachingAlert } from "./CoachingAlert";
 import { SessionSummary } from "./SessionSummary";
 
 export function InterviewCoach() {
+  const { isSignedIn } = useAuth();
   const {
     sessionState,
     transcript,
@@ -50,7 +57,17 @@ export function InterviewCoach() {
           </h1>
           <p className="text-xs text-slate-500">Real-time STAR coaching</p>
         </div>
-        <StatusIndicator state={sessionState} />
+        <div className="flex items-center gap-4">
+          <StatusIndicator state={sessionState} />
+          {isSignedIn ? <UserButton /> : null}
+          {/*
+          <SignInButton mode="modal">
+            <button className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800">
+              Sign In
+            </button>
+          </SignInButton>
+          */}
+        </div>
       </div>
 
       {/* Idle state */}
@@ -80,6 +97,13 @@ export function InterviewCoach() {
           >
             Start Interview
           </button>
+          {/*
+          <SignInButton mode="modal">
+            <button className="rounded-xl bg-white px-10 py-4 text-base font-semibold text-slate-900 shadow-lg shadow-white/10 transition-all hover:bg-slate-100 hover:shadow-white/20 active:scale-[0.98]">
+              Sign in to Start
+            </button>
+          </SignInButton>
+          */}
 
           <p className="text-xs text-slate-600">
             Requires microphone access &middot; Works best in Chrome
