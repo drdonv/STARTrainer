@@ -4,6 +4,8 @@ A real-time behavioral interview coach that listens while you speak and **interr
 
 > The defining feature is not post-hoc analysis — it is the live interruption. If you ramble, overuse filler words, or stall on STAR structure while speaking, the app hard-stops you immediately.
 
+<img width="934" height="598" alt="image" src="https://github.com/user-attachments/assets/4535c841-6ee2-462d-b51e-21c428028e10" />
+
 **Contributors and AI agents:** For a concise map of `src/`, data flow, `SessionState` transitions, and a “how to add a feature” checklist, see **[ORCHESTRATOR.md](./ORCHESTRATOR.md)**.
 
 ---
